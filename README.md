@@ -81,17 +81,13 @@ ros2 launch two_wheel_robot two_wheel_gazebo_launch.py
 
 ## 📸 Screenshots
 
-> Add screenshots or GIFs here after running the simulation.
+### Gazebo Simulation
 
-Example:
+![Gazebo Simulation](image.png)
 
-```
-images/
-├── gazebo.png
-├── rviz.png
-└── demo.gif
-```
+### Project Screenshot
 
+![Project Screenshot](Screenshot%20from%202026-07-09%2014-51-50.png)
 ---
 
 ## 🛠 Technologies Used
