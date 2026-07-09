@@ -1,0 +1,11 @@
+.vscode/browse.vc.db
+.vscode/browse.vc.db-shm
+.vscode/browse.vc.db-wal
+*.db
+*.db-shm
+*.db-wal
+build/
+install/
+log/
+__pycache__/
+*.pyc
