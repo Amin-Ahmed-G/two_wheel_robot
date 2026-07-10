@@ -85,6 +85,14 @@
 
   .lidar-wrap{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;}
   .lidar-wrap canvas{background:#0a0c0e;border-radius:8px;border:1px solid var(--line);flex:0 0 auto;}
+  #mapCanvas, #lidarCanvas {
+    width: 420px;
+    height: 420px;
+    max-width: 100%;
+  }
+  #mapCanvas {
+    image-rendering: pixelated;
+  }
   .lidar-info{display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:1;min-width:220px;align-content:start;}
   .lidar-info .hint{grid-column:1 / -1;}
 </style>
@@ -122,7 +130,7 @@
       </div>
       <button class="btn" id="connectBtn">Connect</button>
     </div>
-    <div class="conn-grid" style="grid-template-columns:1fr 1fr 1fr auto;margin-top:10px;">
+    <div class="conn-grid" style="grid-template-columns:1fr 1fr 1fr 1fr auto;margin-top:10px;">
       <div class="field">
         <label>Image message type</label>
         <select id="imageType">
@@ -140,6 +148,10 @@
       <div class="field">
         <label>lidar topic</label>
         <input id="lidarTopic" value="/scan" />
+      </div>
+      <div class="field">
+        <label>map topic</label>
+        <input id="mapTopic" value="/map" />
       </div>
       <div style="align-self:end;">
         <span class="hint" id="errText"></span>
@@ -206,24 +218,51 @@
     </div>
   </div>
 
-  <div class="panel" style="margin-top:18px;">
-    <div class="panel-title"><span>Lidar</span><span id="lidarTopicLabel">/scan</span></div>
-    <div class="lidar-wrap">
-      <canvas id="lidarCanvas" width="420" height="420"></canvas>
-      <div class="lidar-info">
-        <div class="stat">
-          <div class="lbl">range max</div>
-          <div class="val cyan" id="lidarRangeMax">–<span class="unit">m</span></div>
+  <div class="grid" style="margin-top:18px; grid-template-columns: 1fr 1fr;">
+    <!-- Lidar Panel -->
+    <div class="panel">
+      <div class="panel-title"><span>Lidar</span><span id="lidarTopicLabel">/scan</span></div>
+      <div class="lidar-wrap">
+        <canvas id="lidarCanvas" width="420" height="420"></canvas>
+        <div class="lidar-info">
+          <div class="stat">
+            <div class="lbl">range max</div>
+            <div class="val cyan" id="lidarRangeMax">–<span class="unit">m</span></div>
+          </div>
+          <div class="stat">
+            <div class="lbl">points</div>
+            <div class="val cyan" id="lidarPointCount">0</div>
+          </div>
+          <div class="stat">
+            <div class="lbl">closest</div>
+            <div class="val" id="lidarClosest">–<span class="unit">m</span></div>
+          </div>
+          <div class="hint" style="margin-top:2px;">Top-down view. Forward = up. Rings mark 25/50/75/100% of range_max.</div>
         </div>
-        <div class="stat">
-          <div class="lbl">points</div>
-          <div class="val cyan" id="lidarPointCount">0</div>
+      </div>
+    </div>
+
+    <!-- Map & Navigation Panel -->
+    <div class="panel">
+      <div class="panel-title"><span>Map & Navigation</span><span id="mapTopicLabel">/map</span></div>
+      <div class="lidar-wrap">
+        <canvas id="mapCanvas" width="420" height="420" style="cursor:crosshair;"></canvas>
+        <div class="lidar-info">
+          <div class="stat">
+            <div class="lbl">Resolution</div>
+            <div class="val cyan" id="mapResolutionVal">–<span class="unit">m/px</span></div>
+          </div>
+          <div class="stat">
+            <div class="lbl">Size</div>
+            <div class="val cyan" id="mapSizeVal">0x0</div>
+          </div>
+          <div style="grid-column:1 / -1; display:flex; gap:8px; margin-top:8px;">
+            <button class="btn ghost" id="slamBtn" style="flex:1; padding:10px 0;">SLAM: OFF</button>
+            <button class="btn ghost" id="navModeBtn" style="flex:1; padding:10px 0;">Mode: Set Goal</button>
+          </div>
+          <div class="hint" style="margin-top:2px;">Click on the map to set a goal or initial pose. Uses robot orientation.</div>
+          <div class="hint" id="mapFeedback" style="color:var(--cyan);font-weight:600;min-height:16px;margin-top:2px;grid-column:1/-1;"></div>
         </div>
-        <div class="stat">
-          <div class="lbl">closest</div>
-          <div class="val" id="lidarClosest">–<span class="unit">m</span></div>
-        </div>
-        <div class="hint" style="margin-top:2px;">Top-down view. Forward = up. Rings mark 25/50/75/100% of range_max.</div>
       </div>
     </div>
   </div>
@@ -231,16 +270,26 @@
 
 <script>
 (function(){
-  let ros = null, cmdVelTopic = null, odomTopic = null, imageTopic = null, lidarTopic = null;
+  let ros = null, cmdVelTopic = null, odomTopic = null, imageTopic = null, lidarTopic = null, mapTopic = null;
   let connected = false;
   let publishTimer = null;
   let targetLin = 0, targetAng = 0;
   let activeCmdVelMsgType = 'Twist'; // locked in at connect time, not re-read live
   let frameCount = 0, lastFpsTime = performance.now();
+  
+  // SLAM & Nav states
+  let isSlamActive = false;
+  let mapClickMode = 'goal'; // 'goal' or 'initialpose'
+  let currentMapMsg = null;
+  let currentMapInfo = null;
+  let lastOdomPose = null;
 
   const el = id => document.getElementById(id);
   const statusDot = el('statusDot'), statusText = el('statusText'), errText = el('errText');
   const connectBtn = el('connectBtn');
+  const slamBtn = el('slamBtn');
+  const navModeBtn = el('navModeBtn');
+  const mapCanvas = el('mapCanvas');
 
   function setStatus(state, text){
     statusDot.className = 'dot ' + state;
@@ -272,6 +321,7 @@
       setStatus('', 'disconnected');
       connectBtn.disabled = false; connectBtn.textContent = 'Connect';
       stopPublishLoop();
+      unsubscribeMap();
     });
   }
 
@@ -292,6 +342,12 @@
       el('poseX').textContent = p.x.toFixed(2);
       el('poseY').textContent = p.y.toFixed(2);
       el('poseTheta').textContent = theta.toFixed(2);
+      
+      // Update local odom pose for map overlay
+      lastOdomPose = { x: p.x, y: p.y, theta: theta };
+      if (isSlamActive && currentMapMsg) {
+        redrawMapCanvas();
+      }
     });
 
     el('lidarTopicLabel').textContent = el('lidarTopic').value.trim();
@@ -569,6 +625,229 @@
     }
     el('lidarClosest').innerHTML = (isFinite(closest) ? closest.toFixed(2) : '–') + '<span class="unit">m</span>';
   }
+
+  // ---- SLAM Map & Navigation ----
+  function subscribeMap(){
+    if (!connected || !ros) return;
+    const topicName = el('mapTopic').value.trim();
+    el('mapTopicLabel').textContent = topicName;
+    mapTopic = new ROSLIB.Topic({
+      ros,
+      name: topicName,
+      messageType: 'nav_msgs/OccupancyGrid'
+    });
+    mapTopic.subscribe(function(msg){
+      currentMapMsg = msg;
+      drawMap(msg);
+    });
+    isSlamActive = true;
+    slamBtn.textContent = 'SLAM: ACTIVE';
+    slamBtn.className = 'btn';
+    slamBtn.style.background = 'var(--green)';
+    slamBtn.style.color = '#002a00';
+  }
+
+  function unsubscribeMap(){
+    if (mapTopic) {
+      try { mapTopic.unsubscribe(); } catch(e){}
+      mapTopic = null;
+    }
+    currentMapMsg = null;
+    currentMapInfo = null;
+    isSlamActive = false;
+    slamBtn.textContent = 'SLAM: OFF';
+    slamBtn.className = 'btn ghost';
+    slamBtn.style.background = 'transparent';
+    slamBtn.style.color = 'var(--text)';
+    
+    // Clear canvas
+    const ctx = mapCanvas.getContext('2d');
+    ctx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+    el('mapResolutionVal').innerHTML = '–<span class="unit">m/px</span>';
+    el('mapSizeVal').textContent = '0x0';
+  }
+
+  function drawMap(msg) {
+    const width = msg.info.width;
+    const height = msg.info.height;
+    const resolution = msg.info.resolution;
+    const originX = msg.info.origin.position.x;
+    const originY = msg.info.origin.position.y;
+    const data = msg.data;
+
+    currentMapInfo = { width, height, resolution, originX, originY };
+    el('mapResolutionVal').innerHTML = resolution.toFixed(3) + '<span class="unit">m/px</span>';
+    el('mapSizeVal').textContent = `${width}x${height}`;
+
+    mapCanvas.width = width;
+    mapCanvas.height = height;
+
+    const ctx = mapCanvas.getContext('2d');
+    const imgData = ctx.createImageData(width, height);
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const rosIdx = y * width + x;
+        const canvasIdx = ((height - 1 - y) * width + x) * 4;
+
+        const val = data[rosIdx];
+        let r, g, b, a;
+
+        if (val === -1) {
+          r = 44; g = 51; b = 58; a = 255; // Unknown: dark grey
+        } else if (val === 0) {
+          r = 231; g = 235; b = 238; a = 255; // Free: off-white
+        } else if (val === 100) {
+          r = 20; g = 23; b = 26; a = 255; // Obstacle: black
+        } else {
+          r = 100; g = 100; b = 100; a = 255; // Intermediate
+        }
+
+        imgData.data[canvasIdx] = r;
+        imgData.data[canvasIdx+1] = g;
+        imgData.data[canvasIdx+2] = b;
+        imgData.data[canvasIdx+3] = a;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+    drawRobotOnMap(ctx);
+  }
+
+  function redrawMapCanvas() {
+    if (!currentMapMsg) return;
+    drawMap(currentMapMsg);
+  }
+
+  function drawRobotOnMap(ctx) {
+    if (!lastOdomPose || !currentMapInfo) return;
+    
+    const { width, height, resolution, originX, originY } = currentMapInfo;
+    const px = (lastOdomPose.x - originX) / resolution;
+    const py = height - ((lastOdomPose.y - originY) / resolution);
+
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(-lastOdomPose.theta); // Canvas rotate is clockwise, ROS theta is CCW
+
+    // Draw triangle pointing forward (right in canvas)
+    ctx.beginPath();
+    ctx.moveTo(14, 0);
+    ctx.lineTo(-8, -8);
+    ctx.lineTo(-4, 0);
+    ctx.lineTo(-8, 8);
+    ctx.closePath();
+    ctx.fillStyle = '#ffb020';
+    ctx.fill();
+    ctx.strokeStyle = '#14171a';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function showMapFeedback(text) {
+    const feedback = el('mapFeedback');
+    feedback.textContent = text;
+    setTimeout(() => {
+      if (feedback.textContent === text) {
+        feedback.textContent = '';
+      }
+    }, 3000);
+  }
+
+  slamBtn.addEventListener('click', function(){
+    if (!connected) {
+      showMapFeedback("Please connect to ROS first.");
+      return;
+    }
+    if (isSlamActive) {
+      unsubscribeMap();
+    } else {
+      subscribeMap();
+    }
+  });
+
+  navModeBtn.addEventListener('click', function(){
+    if (mapClickMode === 'goal') {
+      mapClickMode = 'initialpose';
+      navModeBtn.textContent = 'Mode: Set Pose';
+      navModeBtn.style.borderColor = 'var(--cyan)';
+      navModeBtn.style.color = 'var(--cyan)';
+    } else {
+      mapClickMode = 'goal';
+      navModeBtn.textContent = 'Mode: Set Goal';
+      navModeBtn.style.borderColor = 'var(--line)';
+      navModeBtn.style.color = 'var(--text)';
+    }
+  });
+
+  mapCanvas.addEventListener('click', function(e) {
+    if (!connected || !currentMapInfo) return;
+
+    const rect = mapCanvas.getBoundingClientRect();
+    const scaleX = mapCanvas.width / rect.width;
+    const scaleY = mapCanvas.height / rect.height;
+    
+    const canvasX = (e.clientX - rect.left) * scaleX;
+    const canvasY = (e.clientY - rect.top) * scaleY;
+
+    const { height, resolution, originX, originY } = currentMapInfo;
+    const rosX = originX + (canvasX * resolution);
+    const rosY = originY + ((height - canvasY) * resolution);
+    const theta = lastOdomPose ? lastOdomPose.theta : 0;
+
+    const qz = Math.sin(theta / 2);
+    const qw = Math.cos(theta / 2);
+
+    const poseStamped = {
+      header: {
+        stamp: { sec: 0, nanosec: 0 },
+        frame_id: 'map'
+      },
+      pose: {
+        position: { x: rosX, y: rosY, z: 0 },
+        orientation: { x: 0, y: 0, z: qz, w: qw }
+      }
+    };
+
+    if (mapClickMode === 'goal') {
+      const topic = new ROSLIB.Topic({
+        ros,
+        name: '/goal_pose',
+        messageType: 'geometry_msgs/PoseStamped'
+      });
+      topic.publish(new ROSLIB.Message(poseStamped));
+      showMapFeedback(`Goal sent: X=${rosX.toFixed(2)}, Y=${rosY.toFixed(2)}`);
+    } else {
+      const poseWithCovariance = {
+        header: {
+          stamp: { sec: 0, nanosec: 0 },
+          frame_id: 'map'
+        },
+        pose: {
+          pose: {
+            position: { x: rosX, y: rosY, z: 0 },
+            orientation: { x: 0, y: 0, z: qz, w: qw }
+          },
+          covariance: [
+            0.25, 0, 0, 0, 0, 0,
+            0, 0.25, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0.068
+          ]
+        }
+      };
+      const topic = new ROSLIB.Topic({
+        ros,
+        name: '/initialpose',
+        messageType: 'geometry_msgs/PoseWithCovarianceStamped'
+      });
+      topic.publish(new ROSLIB.Message(poseWithCovariance));
+      showMapFeedback(`Initial Pose set: X=${rosX.toFixed(2)}, Y=${rosY.toFixed(2)}`);
+    }
+  });
 
   drawLidarBase();
   drawJoystick();
