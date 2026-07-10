@@ -20,3 +20,4 @@ diff_drive_controller:
     base_frame_id: base_link
     enable_odom_tf: true
     cmd_vel_timeout: 0.5
+    use_stamped_vel: false
