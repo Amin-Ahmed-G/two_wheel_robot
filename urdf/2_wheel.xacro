@@ -107,6 +107,9 @@
       <material>Gazebo/Black</material>
       <mu1>1.0</mu1>
       <mu2>1.0</mu2>
+      <kp>1000000.0</kp>
+      <kd>100.0</kd>
+      <minDepth>0.001</minDepth>
     </gazebo>
   </xacro:macro>
 
@@ -139,6 +142,9 @@
     <material>Gazebo/Black</material>
     <mu1>0.0</mu1>
     <mu2>0.0</mu2>
+    <kp>1000000.0</kp>
+    <kd>100.0</kd>
+    <minDepth>0.001</minDepth>
   </gazebo>
 
   <!-- ================= LIDAR (top) ================= -->
