@@ -141,8 +141,8 @@
       <div class="field">
         <label>cmd_vel message type</label>
         <select id="twistType">
-          <option value="Twist" selected>geometry_msgs/Twist</option>
-          <option value="TwistStamped">geometry_msgs/TwistStamped</option>
+          <option value="Twist">geometry_msgs/Twist</option>
+          <option value="TwistStamped" selected>geometry_msgs/TwistStamped</option>
         </select>
       </div>
       <div class="field">
@@ -260,6 +260,9 @@
             <button class="btn ghost" id="slamBtn" style="flex:1; padding:10px 0;">SLAM: OFF</button>
             <button class="btn ghost" id="navModeBtn" style="flex:1; padding:10px 0;">Mode: Set Goal</button>
           </div>
+          <div style="grid-column:1 / -1; display:flex; gap:8px; margin-top:8px;">
+            <button class="btn" id="autoNavBtn" style="flex:1; padding:10px 0; background:var(--cyan); color:#002a2a;">Start Auto-Nav Demo</button>
+          </div>
           <div class="hint" style="margin-top:2px;">Click on the map to set a goal or initial pose. Uses robot orientation.</div>
           <div class="hint" id="mapFeedback" style="color:var(--cyan);font-weight:600;min-height:16px;margin-top:2px;grid-column:1/-1;"></div>
         </div>
@@ -270,7 +273,8 @@
 
 <script>
 (function(){
-  let ros = null, cmdVelTopic = null, odomTopic = null, imageTopic = null, lidarTopic = null, mapTopic = null;
+  let ros = null, cmdVelTopic = null, odomTopic = null, imageTopic = null, lidarTopic = null, mapTopic = null, robotPoseTopic = null, planTopic = null;
+  let lastRobotPoseTime = 0;
   let connected = false;
   let publishTimer = null;
   let targetLin = 0, targetAng = 0;
@@ -279,6 +283,8 @@
   
   // SLAM & Nav states
   let isSlamActive = false;
+  let lastPlanPath = null;
+  let lastLaserScan = null;
   let mapClickMode = 'goal'; // 'goal' or 'initialpose'
   let currentMapMsg = null;
   let currentMapInfo = null;
@@ -336,14 +342,33 @@
       const ang = msg.twist.twist.angular.z;
       el('odomLinVal').innerHTML = lin.toFixed(2) + '<span class="unit">m/s</span>';
       el('odomAngVal').innerHTML = ang.toFixed(2) + '<span class="unit">rad/s</span>';
-      const p = msg.pose.pose.position;
-      const q = msg.pose.pose.orientation;
+      
+      // Fallback to odom pose if /robot_pose has not been active recently
+      if (Date.now() - lastRobotPoseTime > 1500) {
+        const p = msg.pose.pose.position;
+        const q = msg.pose.pose.orientation;
+        const theta = Math.atan2(2*(q.w*q.z + q.x*q.y), 1 - 2*(q.y*q.y + q.z*q.z));
+        el('poseX').textContent = p.x.toFixed(2);
+        el('poseY').textContent = p.y.toFixed(2);
+        el('poseTheta').textContent = theta.toFixed(2);
+        
+        lastOdomPose = { x: p.x, y: p.y, theta: theta };
+        if (isSlamActive && currentMapMsg) {
+          redrawMapCanvas();
+        }
+      }
+    });
+
+    robotPoseTopic = new ROSLIB.Topic({ ros, name: '/robot_pose', messageType: 'geometry_msgs/PoseStamped' });
+    robotPoseTopic.subscribe(function(msg){
+      lastRobotPoseTime = Date.now();
+      const p = msg.pose.position;
+      const q = msg.pose.orientation;
       const theta = Math.atan2(2*(q.w*q.z + q.x*q.y), 1 - 2*(q.y*q.y + q.z*q.z));
       el('poseX').textContent = p.x.toFixed(2);
       el('poseY').textContent = p.y.toFixed(2);
       el('poseTheta').textContent = theta.toFixed(2);
       
-      // Update local odom pose for map overlay
       lastOdomPose = { x: p.x, y: p.y, theta: theta };
       if (isSlamActive && currentMapMsg) {
         redrawMapCanvas();
@@ -352,7 +377,21 @@
 
     el('lidarTopicLabel').textContent = el('lidarTopic').value.trim();
     lidarTopic = new ROSLIB.Topic({ ros, name: el('lidarTopic').value.trim(), messageType: 'sensor_msgs/LaserScan' });
-    lidarTopic.subscribe(function(msg){ drawLidar(msg); });
+    lidarTopic.subscribe(function(msg){
+      lastLaserScan = msg;
+      drawLidar(msg);
+      if (isSlamActive && currentMapMsg) {
+        redrawMapCanvas();
+      }
+    });
+
+    planTopic = new ROSLIB.Topic({ ros, name: '/plan', messageType: 'nav_msgs/Path' });
+    planTopic.subscribe(function(msg){
+      lastPlanPath = msg.poses.map(p => ({ x: p.pose.position.x, y: p.pose.position.y }));
+      if (isSlamActive && currentMapMsg) {
+        redrawMapCanvas();
+      }
+    });
 
     el('imgTopicLabel').textContent = el('imageTopic').value.trim();
     const isCompressed = el('imageType').value === 'compressed';
@@ -392,14 +431,38 @@
     const ctx = canvas.getContext('2d');
     const imgData = ctx.createImageData(w, h);
     const raw = atob(msg.data);
+    const len = raw.length;
+    const rawBytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      rawBytes[i] = raw.charCodeAt(i);
+    }
+    const data = imgData.data;
     const bgr = msg.encoding && msg.encoding.indexOf('bgr') === 0;
     const channels = msg.encoding && msg.encoding.indexOf('mono') === 0 ? 1 : 3;
-    for (let i = 0, j = 0; i < w*h; i++, j += channels){
-      let r,g,b;
-      if (channels === 1){ r=g=b = raw.charCodeAt(j); }
-      else if (bgr){ b = raw.charCodeAt(j); g = raw.charCodeAt(j+1); r = raw.charCodeAt(j+2); }
-      else { r = raw.charCodeAt(j); g = raw.charCodeAt(j+1); b = raw.charCodeAt(j+2); }
-      imgData.data[i*4] = r; imgData.data[i*4+1] = g; imgData.data[i*4+2] = b; imgData.data[i*4+3] = 255;
+    if (channels === 3) {
+      if (bgr) {
+        for (let i = 0, j = 0; i < w*h; i++, j += 3) {
+          data[i*4] = rawBytes[j+2];
+          data[i*4+1] = rawBytes[j+1];
+          data[i*4+2] = rawBytes[j];
+          data[i*4+3] = 255;
+        }
+      } else {
+        for (let i = 0, j = 0; i < w*h; i++, j += 3) {
+          data[i*4] = rawBytes[j];
+          data[i*4+1] = rawBytes[j+1];
+          data[i*4+2] = rawBytes[j+2];
+          data[i*4+3] = 255;
+        }
+      }
+    } else if (channels === 1) {
+      for (let i = 0; i < w*h; i++) {
+        const val = rawBytes[i];
+        data[i*4] = val;
+        data[i*4+1] = val;
+        data[i*4+2] = val;
+        data[i*4+3] = 255;
+      }
     }
     ctx.putImageData(imgData, 0, 0);
   }
@@ -616,8 +679,8 @@
       if (!isFinite(r) || r <= msg.range_min || r > rangeMax) continue;
       if (r < closest) closest = r;
       const theta = angleMin + i * angleInc;
-      // forward (robot +x) = up on screen; angle increases counter-clockwise
-      const px = LCX + Math.sin(theta) * (r / rangeMax) * LMAXR;
+      // forward (robot +x) = up on screen; angle increases counter-clockwise (subtract sin to prevent mirror)
+      const px = LCX - Math.sin(theta) * (r / rangeMax) * LMAXR;
       const py = LCY - Math.cos(theta) * (r / rangeMax) * LMAXR;
       lctx.beginPath();
       lctx.arc(px, py, 2, 0, Math.PI*2);
@@ -710,12 +773,74 @@
       }
     }
     ctx.putImageData(imgData, 0, 0);
+    drawPathOnMap(ctx);
+    drawLidarOnMap(ctx);
     drawRobotOnMap(ctx);
   }
 
   function redrawMapCanvas() {
     if (!currentMapMsg) return;
     drawMap(currentMapMsg);
+  }
+
+  function drawPathOnMap(ctx) {
+    if (!lastPlanPath || lastPlanPath.length === 0 || !currentMapInfo) return;
+    const { height, resolution, originX, originY } = currentMapInfo;
+
+    ctx.save();
+    ctx.beginPath();
+    
+    const startX = (lastPlanPath[0].x - originX) / resolution;
+    const startY = height - ((lastPlanPath[0].y - originY) / resolution);
+    ctx.moveTo(startX, startY);
+
+    for (let i = 1; i < lastPlanPath.length; i++) {
+      const px = (lastPlanPath[i].x - originX) / resolution;
+      const py = height - ((lastPlanPath[i].y - originY) / resolution);
+      ctx.lineTo(px, py);
+    }
+
+    ctx.strokeStyle = '#00f0ff';
+    ctx.lineWidth = 2.0;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawLidarOnMap(ctx) {
+    if (!lastLaserScan || !lastOdomPose || !currentMapInfo) return;
+    const { height, resolution, originX, originY } = currentMapInfo;
+    const ranges = lastLaserScan.ranges;
+    const angleMin = lastLaserScan.angle_min;
+    const angleInc = lastLaserScan.angle_increment;
+    const rangeMin = lastLaserScan.range_min;
+    const rangeMax = lastLaserScan.range_max;
+
+    const xr = lastOdomPose.x;
+    const yr = lastOdomPose.y;
+    const theta = lastOdomPose.theta;
+
+    ctx.save();
+    ctx.fillStyle = '#ff3b30';
+
+    for (let i = 0; i < ranges.length; i++) {
+      const r = ranges[i];
+      if (!isFinite(r) || r <= rangeMin || r > rangeMax) continue;
+
+      const angle = theta + (angleMin + i * angleInc);
+
+      const x_hit = xr + r * Math.cos(angle);
+      const y_hit = yr + r * Math.sin(angle);
+
+      const px = (x_hit - originX) / resolution;
+      const py = height - ((y_hit - originY) / resolution);
+
+      ctx.beginPath();
+      ctx.arc(px, py, 1.5, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   function drawRobotOnMap(ctx) {
@@ -847,6 +972,39 @@
       topic.publish(new ROSLIB.Message(poseWithCovariance));
       showMapFeedback(`Initial Pose set: X=${rosX.toFixed(2)}, Y=${rosY.toFixed(2)}`);
     }
+  });
+
+  const autoNavBtn = el('autoNavBtn');
+  autoNavBtn.addEventListener('click', function() {
+    if (!connected) {
+      showMapFeedback("Please connect to ROS first.");
+      return;
+    }
+    
+    // Set a goal at x=4.0, y=0.0, heading theta=0.0 (qw=1, qz=0)
+    const rosX = 4.0;
+    const rosY = 0.0;
+    const qz = 0.0;
+    const qw = 1.0;
+
+    const poseStamped = {
+      header: {
+        stamp: { sec: 0, nanosec: 0 },
+        frame_id: 'map'
+      },
+      pose: {
+        position: { x: rosX, y: rosY, z: 0 },
+        orientation: { x: 0, y: 0, z: qz, w: qw }
+      }
+    };
+
+    const topic = new ROSLIB.Topic({
+      ros,
+      name: '/goal_pose',
+      messageType: 'geometry_msgs/PoseStamped'
+    });
+    topic.publish(new ROSLIB.Message(poseStamped));
+    showMapFeedback(`Auto-Nav Demo Goal sent: X=${rosX.toFixed(2)}, Y=${rosY.toFixed(2)}`);
   });
 
   drawLidarBase();

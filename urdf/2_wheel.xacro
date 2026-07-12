@@ -12,7 +12,7 @@
   <xacro:property name="wheel_mass"     value="0.5"/>
   <xacro:property name="wheel_y_offset" value="0.18"/>
 
-  <xacro:property name="caster_radius"  value="0.025"/>
+  <xacro:property name="caster_radius"  value="0.05"/>
   <xacro:property name="caster_mass"    value="0.2"/>
   <xacro:property name="caster_x_offset" value="0.17"/>
 
@@ -20,6 +20,7 @@
   <xacro:property name="lidar_height"   value="0.05"/>
 
   <xacro:property name="camera_size"    value="0.02"/>
+  <xacro:property name="chassis_z_offset" value="0.015"/>
 
   <material name="chassis_grey"><color rgba="0.3 0.3 0.3 1.0"/></material>
   <material name="wheel_black"><color rgba="0.05 0.05 0.05 1.0"/></material>
@@ -56,17 +57,17 @@
 
   <link name="base_link">
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="0 0 ${chassis_z_offset}" rpy="0 0 0"/>
       <geometry><box size="${chassis_length} ${chassis_width} ${chassis_height}"/></geometry>
       <material name="chassis_grey"/>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="0 0 ${chassis_z_offset}" rpy="0 0 0"/>
       <geometry><box size="${chassis_length} ${chassis_width} ${chassis_height}"/></geometry>
     </collision>
     <inertial>
       <mass value="${chassis_mass}"/>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="0 0 ${chassis_z_offset}" rpy="0 0 0"/>
       <xacro:box_inertia mass="${chassis_mass}" x="${chassis_length}" y="${chassis_width}" z="${chassis_height}"/>
     </inertial>
   </link>
@@ -161,7 +162,7 @@
   <joint name="lidar_joint" type="fixed">
     <parent link="base_link"/>
     <child link="lidar_link"/>
-    <origin xyz="0 0 ${chassis_height/2 + lidar_height/2}" rpy="0 0 0"/>
+    <origin xyz="0 0 ${chassis_height/2 + lidar_height/2 + chassis_z_offset}" rpy="0 0 0"/>
   </joint>
 
   <gazebo reference="lidar_link">
@@ -216,7 +217,7 @@
   <joint name="camera_joint" type="fixed">
     <parent link="base_link"/>
     <child link="camera_link"/>
-    <origin xyz="${chassis_length/2} 0 0" rpy="0 0 0"/>
+    <origin xyz="${chassis_length/2} 0 ${chassis_z_offset}" rpy="0 0 0"/>
   </joint>
 
   <!-- optical frame, REP-103 convention -->
@@ -231,12 +232,12 @@
     <sensor name="front_camera" type="camera">
       <pose>0 0 0 0 0 0</pose>
       <topic>camera/image_raw</topic>
-      <update_rate>30</update_rate>
+      <update_rate>10</update_rate>
       <camera>
         <horizontal_fov>1.047</horizontal_fov>
         <image>
-          <width>640</width>
-          <height>480</height>
+          <width>320</width>
+          <height>240</height>
         </image>
         <clip>
           <near>0.05</near>

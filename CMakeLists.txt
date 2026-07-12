@@ -13,6 +13,7 @@ install(DIRECTORY
 
 install(PROGRAMS
   src/waypoint_follower_node.py
+  src/tf_to_pose_publisher.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
