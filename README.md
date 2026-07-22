@@ -19,7 +19,9 @@ A robust and highly-customizable **differential drive robot simulation** develop
 
 ## 🎥 Simulation Demo
 
-https://github.com/Amin-Ahmed-G/two_wheel_robot/raw/main/two_wheel_robot.mp4
+[![Simulation Video](image.png)](https://github.com/Amin-Ahmed-G/two_wheel_robot/blob/main/two_wheel_robot.mp4)
+
+*Click the image above to watch the simulation video.*
 
 ---
 
