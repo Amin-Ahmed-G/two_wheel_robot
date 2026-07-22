@@ -81,6 +81,11 @@ ros2 launch two_wheel_robot two_wheel_gazebo_launch.py
 
 ## 📸 Screenshots
 
+### Simulation Video
+
+<video src="two_wheel_robot.mp4" controls="controls" style="max-width: 100%;">
+</video>
+
 ### Gazebo Simulation
 
 ![Gazebo Simulation](image.png)
