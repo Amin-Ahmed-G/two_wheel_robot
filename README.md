@@ -99,11 +99,11 @@ two_wheel_robot/
 - [x] Robot URDF/Xacro Modeling
 - [x] Gazebo Simulation Environment
 - [x] ROS 2 Controller Integration
-- [ ] 📡 LiDAR Integration & Obstacle Avoidance
-- [ ] 📷 Camera Integration & Object Detection
-- [ ] 🗺️ SLAM Toolbox Mapping
-- [ ] 🧭 Nav2 Navigation Stack Integration
-- [ ] 🤖 Autonomous Waypoint Navigation & Exploration
+- [x] 📡 LiDAR Integration & Obstacle Avoidance
+- [x] 📷 Camera Integration & Object Detection
+- [x] 🗺️ SLAM Toolbox Mapping
+- [x] 🧭 Nav2 Navigation Stack Integration
+- [x] 🤖 Autonomous Waypoint Navigation & Exploration
 
 ---
 
